@@ -1,0 +1,52 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build release APK
+        id: build
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PantryAI-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish APK + log to ci-output branch
+        if: always()
+        run: |
+          mkdir -p out
+          cp build.log out/ 2>/dev/null || true
+          cp app/build/outputs/apk/release/*.apk out/PantryAI.apk 2>/dev/null || true
+          echo "${GITHUB_SHA}" > out/commit.txt
+          echo "${{ steps.build.outcome }}" > out/status.txt
+          cd out
+          git init -q
+          git checkout -q -b ci-output
+          git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "CI output for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-output
